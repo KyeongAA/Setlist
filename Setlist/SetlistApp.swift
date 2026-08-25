@@ -10,9 +10,13 @@ import SwiftData
 
 @main
 struct SetlistApp: App {
+    @StateObject private var spotifySession = SpotifySession()
+
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
-            Item.self,
+            ConcertRecord.self,
+            SongRecord.self,
+            RecognitionGapRecord.self,
         ])
         let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
 
@@ -25,7 +29,8 @@ struct SetlistApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            AppRootView()
+                .environmentObject(spotifySession)
         }
         .modelContainer(sharedModelContainer)
     }

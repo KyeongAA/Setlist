@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.Phoebe.Setlist.spotify-login</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>com-phoebe-setlist-spotify-login</string>
+			</array>
+		</dict>
+	</array>
+	<key>SpotifyClientID</key>
+	<string>7a2eeeaa0e6d4969ab1b80d484fb7af4</string>
+	<key>SpotifyRedirectURI</key>
+	<string>com-phoebe-setlist-spotify-login://callback</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>공연 중 재생되는 음악을 인식하고 셋리스트를 기록하기 위해 마이크를 사용해요.</string>
+	<key>UIAppFonts</key>
+	<array>
+		<string>Pretendard-Regular.otf</string>
+		<string>Pretendard-Medium.otf</string>
+		<string>Pretendard-SemiBold.otf</string>
+		<string>Pretendard-Bold.otf</string>
+	</array>
+</dict>
+</plist>

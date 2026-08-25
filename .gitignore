@@ -1,0 +1,20 @@
+# macOS
+.DS_Store
+
+# Xcode user-specific data
+xcuserdata/
+*.xcuserstate
+*.xccheckout
+*.xcscmblueprint
+
+# Build products
+DerivedData/
+build/
+.build/
+
+# Swift Package Manager user data
+.swiftpm/xcode/package.xcworkspace/xcuserdata/
+
+# Signing credentials and provisioning profiles
+*.p12
+*.mobileprovision
