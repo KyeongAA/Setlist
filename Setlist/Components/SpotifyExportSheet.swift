@@ -23,6 +23,7 @@ private struct SpotifyExportSheetModifier: ViewModifier {
                         isPresented = false
                     }
                 )
+                .spotifyErrorAlert()
                 .presentationDetents([.height(398)])
                 .presentationDragIndicator(.hidden)
                 .presentationBackground(SetlistColor.backgroundCanvas)

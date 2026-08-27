@@ -10,10 +10,12 @@ private enum SetlistAppDestination: Equatable {
 
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.scenePhase) private var scenePhase
     @Query(sort: \ConcertRecord.eventDate, order: .reverse)
     private var concerts: [ConcertRecord]
 
     @StateObject private var recognizer = ShazamRecognitionService()
+    @StateObject private var liveActivityManager = RecognitionLiveActivityManager()
     @State private var destination: SetlistAppDestination = .home
     @State private var presentedRecognitionID: UUID?
     @State private var didRestoreRecording = false
@@ -28,13 +30,32 @@ struct ContentView: View {
             }
             .onChange(of: recognizer.latestMatch) { _, match in
                 guard let match, let recordingConcert else { return }
+                let recognizedSongNumber = recordingConcert.orderedSongs.count + 1
                 addRecognizedTrack(match, to: recordingConcert)
+                liveActivityManager.recognized(
+                    songNumber: recognizedSongNumber,
+                    title: match.title,
+                    artist: match.artistName
+                )
             }
             .onChange(of: recognizer.latestGap) { _, gap in
                 guard let gap, let recordingConcert else { return }
                 addRecognitionGap(gap, to: recordingConcert)
             }
+            .onChange(of: recognizer.state) { _, state in
+                synchronizeLiveActivity(with: state)
+            }
+            .onChange(of: scenePhase) { _, phase in
+                guard phase != .active else { return }
+                synchronizeLiveActivity(
+                    with: recognizer.state,
+                    allowsStarting: true
+                )
+            }
             .task {
+                RecognitionControlBridge.shared.install { [weak recognizer] shouldListen in
+                    await recognizer?.setListening(shouldListen)
+                }
                 restoreRecordingIfNeeded()
             }
     }
@@ -302,6 +323,42 @@ struct ContentView: View {
         )
     }
 
+    private func synchronizeLiveActivity(
+        with state: ShazamRecognitionState,
+        allowsStarting: Bool = false
+    ) {
+        guard let recordingConcert else {
+            liveActivityManager.end()
+            return
+        }
+
+        let nextSongNumber = recordingConcert.orderedSongs.count + 1
+
+        switch state {
+        case .listening:
+            guard liveActivityManager.isActive || allowsStarting else { return }
+            liveActivityManager.startOrResume(
+                concertID: recordingConcert.id,
+                nextSongNumber: nextSongNumber
+            )
+        case .paused:
+            if liveActivityManager.isActive {
+                liveActivityManager.pause(nextSongNumber: nextSongNumber)
+            } else if allowsStarting {
+                liveActivityManager.startPaused(
+                    concertID: recordingConcert.id,
+                    nextSongNumber: nextSongNumber
+                )
+            }
+            updateRecognitionDuration(
+                recognizer.elapsedDuration,
+                in: recordingConcert
+            )
+        case .idle, .microphonePermissionDenied, .failed:
+            liveActivityManager.end()
+        }
+    }
+
     private func saveCompletedConcert(
         _ concert: ConcertRecord,
         title: String,
@@ -373,6 +430,7 @@ struct ContentView: View {
                 spotifyTrackID: track.id,
                 spotifyURI: track.uri
             )
+            refreshLiveActivitySongNumber(for: concert)
         } catch {
             assertionFailure("Failed to add Spotify track: \(error)")
         }
@@ -411,6 +469,7 @@ struct ContentView: View {
 
         do {
             try ConcertStore(modelContext: modelContext).remove(record, from: concert)
+            refreshLiveActivitySongNumber(for: concert)
         } catch {
             assertionFailure("Failed to delete song: \(error)")
         }
@@ -475,6 +534,14 @@ struct ContentView: View {
         } catch {
             assertionFailure("Failed to update recognition duration: \(error)")
         }
+    }
+
+    private func refreshLiveActivitySongNumber(for concert: ConcertRecord) {
+        guard concert.status == .recording else { return }
+        liveActivityManager.refresh(
+            nextSongNumber: concert.orderedSongs.count + 1,
+            isListening: recognizer.state == .listening
+        )
     }
 }
 

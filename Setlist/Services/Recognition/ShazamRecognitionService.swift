@@ -46,11 +46,18 @@ final class ShazamRecognitionService: NSObject, ObservableObject {
     private var unmatchedStartTime: TimeInterval?
     private var gapThresholdTask: Task<Void, Never>?
     private var elapsedUpdateTask: Task<Void, Never>?
+    private var recoveryTask: Task<Void, Never>?
+    private var shouldResumeAfterInterruption = false
 
     init(gapThreshold: TimeInterval = 180) {
         self.gapThreshold = gapThreshold
         super.init()
         shazamSession.delegate = self
+        observeAudioSessionLifecycle()
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
     }
 
     func restoreElapsedDuration(_ duration: TimeInterval) {
@@ -78,9 +85,7 @@ final class ShazamRecognitionService: NSObject, ObservableObject {
             startElapsedUpdates()
             scheduleGapThresholdIfNeeded()
         } catch {
-            tearDownRecognitionPipeline()
-            deactivateAudioSession()
-            state = .failed
+            failRecognition()
         }
     }
 
@@ -101,12 +106,24 @@ final class ShazamRecognitionService: NSObject, ObservableObject {
         }
     }
 
+    func setListening(_ shouldListen: Bool) async {
+        if shouldListen {
+            guard state != .listening else { return }
+            await start()
+        } else {
+            guard state == .listening else { return }
+            await toggleListening()
+        }
+    }
+
     @discardableResult
     func stop() -> ShazamRecognitionGap? {
         updateElapsedDuration()
         listeningStartedAt = nil
         elapsedUpdateTask?.cancel()
         gapThresholdTask?.cancel()
+        recoveryTask?.cancel()
+        shouldResumeAfterInterruption = false
 
         var completedGap: ShazamRecognitionGap?
         if let unmatchedStartTime,
@@ -127,9 +144,167 @@ final class ShazamRecognitionService: NSObject, ObservableObject {
         try audioSession.setCategory(
             .playAndRecord,
             mode: .measurement,
-            options: [.defaultToSpeaker]
+            options: [.defaultToSpeaker, .allowBluetoothHFP]
         )
         try audioSession.setActive(true)
+    }
+
+    private func observeAudioSessionLifecycle() {
+        let center = NotificationCenter.default
+        let audioSession = AVAudioSession.sharedInstance()
+
+        center.addObserver(
+            self,
+            selector: #selector(receiveAudioSessionInterruption(_:)),
+            name: AVAudioSession.interruptionNotification,
+            object: audioSession
+        )
+        center.addObserver(
+            self,
+            selector: #selector(receiveAudioRouteChange(_:)),
+            name: AVAudioSession.routeChangeNotification,
+            object: audioSession
+        )
+        center.addObserver(
+            self,
+            selector: #selector(receiveMediaServicesReset(_:)),
+            name: AVAudioSession.mediaServicesWereResetNotification,
+            object: audioSession
+        )
+    }
+
+    @objc nonisolated private func receiveAudioSessionInterruption(
+        _ notification: Notification
+    ) {
+        let rawType = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt
+        let rawOptions = notification.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
+
+        Task { @MainActor [weak self] in
+            self?.handleAudioSessionInterruption(
+                rawType: rawType,
+                rawOptions: rawOptions
+            )
+        }
+    }
+
+    @objc nonisolated private func receiveAudioRouteChange(
+        _ notification: Notification
+    ) {
+        let rawReason = notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt
+
+        Task { @MainActor [weak self] in
+            self?.handleAudioRouteChange(rawReason: rawReason)
+        }
+    }
+
+    @objc nonisolated private func receiveMediaServicesReset(
+        _ notification: Notification
+    ) {
+        Task { @MainActor [weak self] in
+            self?.schedulePipelineRecovery()
+        }
+    }
+
+    private func handleAudioSessionInterruption(
+        rawType: UInt?,
+        rawOptions: UInt
+    ) {
+        guard let rawType, let type = AVAudioSession.InterruptionType(rawValue: rawType) else {
+            return
+        }
+
+        switch type {
+        case .began:
+            guard state == .listening, listeningStartedAt != nil else { return }
+            updateElapsedDuration()
+            listeningStartedAt = nil
+            elapsedUpdateTask?.cancel()
+            gapThresholdTask?.cancel()
+            shouldResumeAfterInterruption = true
+            tearDownRecognitionPipeline()
+
+        case .ended:
+            let options = AVAudioSession.InterruptionOptions(rawValue: rawOptions)
+            guard shouldResumeAfterInterruption else { return }
+            shouldResumeAfterInterruption = false
+
+            if options.contains(.shouldResume) {
+                schedulePipelineRecovery()
+            } else {
+                state = .paused
+                deactivateAudioSession()
+            }
+
+        @unknown default:
+            break
+        }
+    }
+
+    private func handleAudioRouteChange(rawReason: UInt?) {
+        guard
+            state == .listening,
+            listeningStartedAt != nil,
+            let rawReason,
+            let reason = AVAudioSession.RouteChangeReason(rawValue: rawReason)
+        else {
+            return
+        }
+
+        switch reason {
+        case .newDeviceAvailable, .oldDeviceUnavailable:
+            schedulePipelineRecovery()
+        default:
+            break
+        }
+    }
+
+    private func schedulePipelineRecovery() {
+        guard state == .listening else { return }
+        recoveryTask?.cancel()
+        recoveryTask = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(for: .milliseconds(250))
+                try self?.recoverRecognitionPipeline()
+            } catch is CancellationError {
+                return
+            } catch {
+                self?.failRecognition()
+            }
+        }
+    }
+
+    private func recoverRecognitionPipeline() throws {
+        guard state == .listening else { return }
+
+        if listeningStartedAt != nil {
+            updateElapsedDuration()
+        }
+        listeningStartedAt = nil
+        elapsedUpdateTask?.cancel()
+        gapThresholdTask?.cancel()
+
+        try configureAudioSession()
+        try rebuildRecognitionPipeline()
+        audioEngine.prepare()
+        try audioEngine.start()
+
+        listeningStartedAt = .now
+        startElapsedUpdates()
+        scheduleGapThresholdIfNeeded()
+    }
+
+    private func failRecognition() {
+        if listeningStartedAt != nil {
+            updateElapsedDuration()
+        }
+        listeningStartedAt = nil
+        elapsedUpdateTask?.cancel()
+        gapThresholdTask?.cancel()
+        recoveryTask?.cancel()
+        shouldResumeAfterInterruption = false
+        tearDownRecognitionPipeline()
+        deactivateAudioSession()
+        state = .failed
     }
 
     private func rebuildRecognitionPipeline() throws {
@@ -316,10 +491,11 @@ final class ShazamRecognitionService: NSObject, ObservableObject {
 
 extension ShazamRecognitionService: SHSessionDelegate {
     nonisolated func session(_ session: SHSession, didFind match: SHMatch) {
+        let callbackSessionID = ObjectIdentifier(session)
         Task { @MainActor [weak self] in
             guard
                 let self,
-                session === self.shazamSession,
+                callbackSessionID == ObjectIdentifier(self.shazamSession),
                 self.state == .listening
             else {
                 return
@@ -333,10 +509,11 @@ extension ShazamRecognitionService: SHSessionDelegate {
         didNotFindMatchFor signature: SHSignature,
         error: (any Error)?
     ) {
+        let callbackSessionID = ObjectIdentifier(session)
         Task { @MainActor [weak self] in
             guard
                 let self,
-                session === self.shazamSession,
+                callbackSessionID == ObjectIdentifier(self.shazamSession),
                 self.state == .listening
             else {
                 return
@@ -344,9 +521,7 @@ extension ShazamRecognitionService: SHSessionDelegate {
             if error == nil {
                 self.handleNoMatch()
             } else {
-                self.tearDownRecognitionPipeline()
-                self.deactivateAudioSession()
-                self.state = .failed
+                self.failRecognition()
             }
         }
     }

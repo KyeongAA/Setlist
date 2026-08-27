@@ -15,6 +15,7 @@ struct SearchScreen: View {
     @State private var canLoadMore = false
     @State private var isLoadingMore = false
     @State private var visibleLastTrackID: String?
+    @State private var searchTask: Task<Void, Never>?
 
     let searchTracks: (String, Int, Int) async throws -> [SpotifyTrack]
     var addSpotifyTrack: (SpotifyTrack) -> Void = { _ in }
@@ -50,11 +51,11 @@ struct SearchScreen: View {
                 resultsContent
             }
         }
-        .task(id: query) {
-            await searchIfNeeded()
-        }
         .onAppear {
             recentQueries = recentSearchHistory.load()
+        }
+        .onDisappear {
+            searchTask?.cancel()
         }
         .preferredColorScheme(.dark)
     }
@@ -93,12 +94,13 @@ struct SearchScreen: View {
                         ForEach(recentQueries, id: \.self) { recentQuery in
                             Chip(title: recentQuery) {
                                 query = recentQuery
-                                recordRecentSearch(recentQuery)
+                                submitSearch(recentQuery)
                             }
                         }
                     }
                     .padding(.horizontal, SetlistSpacing.medium)
                 }
+                .frame(height: 36)
                 .padding(.top, SetlistSpacing.small)
             }
 
@@ -182,6 +184,7 @@ struct SearchScreen: View {
             text: $query,
             state: state,
             clearAction: {
+                searchTask?.cancel()
                 tracks = []
                 self.state = .focused
             },
@@ -191,30 +194,34 @@ struct SearchScreen: View {
                 }
             },
             submit: {
-                recordRecentSearch(query)
+                submitSearch(query)
             }
         )
+    }
+
+    private func submitSearch(_ submittedQuery: String) {
+        let trimmedQuery = submittedQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedQuery.isEmpty else { return }
+
+        query = trimmedQuery
+        recordRecentSearch(trimmedQuery)
+        searchTask?.cancel()
+        searchTask = Task {
+            await search(trimmedQuery)
+        }
     }
 
     private func recordRecentSearch(_ query: String) {
         recentQueries = recentSearchHistory.record(query)
     }
 
-    private func searchIfNeeded() async {
-        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedQuery.isEmpty else {
-            tracks = []
-            nextOffset = 0
-            canLoadMore = false
-            isLoadingMore = false
-            visibleLastTrackID = nil
-            return
-        }
-
+    private func search(_ submittedQuery: String) async {
         do {
-            try await Task.sleep(for: .milliseconds(350))
-            let results = try await searchTracks(trimmedQuery, pageSize, 0)
+            let results = try await searchTracks(submittedQuery, pageSize, 0)
             try Task.checkCancellation()
+            guard query.trimmingCharacters(in: .whitespacesAndNewlines) == submittedQuery else {
+                return
+            }
             tracks = results
             nextOffset = results.count
             canLoadMore = results.count == pageSize
@@ -224,6 +231,9 @@ struct SearchScreen: View {
         } catch is CancellationError {
             return
         } catch {
+            guard query.trimmingCharacters(in: .whitespacesAndNewlines) == submittedQuery else {
+                return
+            }
             tracks = []
             nextOffset = 0
             canLoadMore = false

@@ -21,7 +21,10 @@ private struct SearchSheetModifier: ViewModifier {
                                     offset: offset
                                 )
                             },
-                            addSpotifyTrack: addSpotifyTrack
+                            addSpotifyTrack: { track in
+                                addSpotifyTrack(track)
+                                isPresented = false
+                            }
                         )
                     } else {
                         SpotifySheet(
@@ -34,6 +37,7 @@ private struct SearchSheetModifier: ViewModifier {
                         )
                     }
                 }
+                .spotifyErrorAlert()
                 .presentationDetents([.large])
                 .presentationDragIndicator(.hidden)
                 .presentationCornerRadius(40)
