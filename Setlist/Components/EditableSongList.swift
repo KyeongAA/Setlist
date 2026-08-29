@@ -1,5 +1,4 @@
 import SwiftUI
-import UniformTypeIdentifiers
 
 struct EditableSongList<Footer: View>: View {
     let songs: [SetlistSong]
@@ -11,7 +10,8 @@ struct EditableSongList<Footer: View>: View {
     var moveSongs: ([SetlistSong], IndexSet, Int) -> Void = { _, _, _ in }
 
     @State private var displayedSongs: [SetlistSong]
-    @State private var draggingSong: SetlistSong?
+    @State private var reorderSession = SongReorderSession()
+    @State private var songRowCenters: [String: CGFloat] = [:]
 
     private let rowHeight: CGFloat = 48
     private let rowSpacing = SetlistSpacing.small
@@ -38,28 +38,21 @@ struct EditableSongList<Footer: View>: View {
     var body: some View {
         ScrollViewReader { scrollProxy in
             List {
-                ForEach(displayedSongs) { song in
+                ForEach(displayedSongs, id: \.stableID) { song in
                     SongRow(
                         song: song,
                         accessory: .handle,
-                        dragProvider: {
-                            draggingSong = song
-                            return NSItemProvider(
-                                object: dragIdentifier(for: song) as NSString
+                        reorderChanged: { value in
+                            updateReorder(
+                                of: song,
+                                locationY: value.location.y
                             )
-                        }
+                        },
+                        reorderEnded: finishReorder
                     )
-                    .id(song.id)
+                    .id(song.stableID)
+                    .measuresSongRowCenter(id: song.stableID)
                     .contentShape(Rectangle())
-                    .onDrop(
-                        of: [UTType.text],
-                        delegate: SongReorderDropDelegate(
-                            targetSong: song,
-                            displayedSongs: $displayedSongs,
-                            draggingSong: $draggingSong,
-                            commitMove: commitMove
-                        )
-                    )
                     .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                         Button(role: .destructive) {
                             deleteSong(song)
@@ -85,6 +78,9 @@ struct EditableSongList<Footer: View>: View {
             .frame(height: fillsAvailableHeight ? nil : listHeight)
             .frame(maxHeight: fillsAvailableHeight ? .infinity : nil)
             .environment(\.defaultMinListRowHeight, rowHeight)
+            .onPreferenceChange(SongRowCenterPreferenceKey.self) { centers in
+                songRowCenters = centers
+            }
             .onChange(of: songs) { oldSongs, newSongs in
                 guard newSongs != displayedSongs else { return }
                 displayedSongs = newSongs
@@ -92,7 +88,7 @@ struct EditableSongList<Footer: View>: View {
                 guard
                     automaticallyScrollsToLatest,
                     newSongs.count > oldSongs.count,
-                    let latestSongID = newSongs.last?.id
+                    let latestSongID = newSongs.last?.stableID
                 else {
                     return
                 }
@@ -117,20 +113,34 @@ struct EditableSongList<Footer: View>: View {
             + CGFloat(visibleRowCount - 1) * rowSpacing
     }
 
-    private func dragIdentifier(for song: SetlistSong) -> String {
-        song.storageID?.uuidString ?? "preview-\(song.id)"
-    }
-
-    private func commitMove(_ draggedSong: SetlistSong, finalIndex: Int) {
-        guard
-            let sourceIndex = songs.firstIndex(of: draggedSong),
-            sourceIndex != finalIndex
-        else {
+    private func updateReorder(
+        of song: SetlistSong,
+        locationY: CGFloat
+    ) {
+        guard let transition = reorderSession.transition(
+            for: song,
+            locationY: locationY,
+            displayedSongs: displayedSongs,
+            rowCenters: songRowCenters
+        ) else {
             return
         }
 
-        let destination = finalIndex > sourceIndex ? finalIndex + 1 : finalIndex
-        moveSongs(songs, IndexSet(integer: sourceIndex), destination)
+        withAnimation(.snappy) {
+            displayedSongs.move(
+                fromOffsets: transition.offsets,
+                toOffset: transition.destination
+            )
+        }
+    }
+
+    private func finishReorder() {
+        guard let move = reorderSession.finish(
+            displayedSongs: displayedSongs
+        ) else {
+            return
+        }
+        moveSongs(move.songs, move.offsets, move.destination)
     }
 }
 
@@ -153,48 +163,6 @@ extension EditableSongList where Footer == EmptyView {
         ) {
             EmptyView()
         }
-    }
-}
-
-struct SongReorderDropDelegate: DropDelegate {
-    let targetSong: SetlistSong
-    @Binding var displayedSongs: [SetlistSong]
-    @Binding var draggingSong: SetlistSong?
-    let commitMove: (SetlistSong, Int) -> Void
-
-    func dropEntered(info: DropInfo) {
-        guard
-            let draggingSong,
-            draggingSong != targetSong,
-            let sourceIndex = displayedSongs.firstIndex(of: draggingSong),
-            let targetIndex = displayedSongs.firstIndex(of: targetSong)
-        else {
-            return
-        }
-
-        withAnimation(.snappy) {
-            displayedSongs.move(
-                fromOffsets: IndexSet(integer: sourceIndex),
-                toOffset: targetIndex > sourceIndex ? targetIndex + 1 : targetIndex
-            )
-        }
-    }
-
-    func dropUpdated(info: DropInfo) -> DropProposal? {
-        DropProposal(operation: .move)
-    }
-
-    func performDrop(info: DropInfo) -> Bool {
-        guard
-            let draggingSong,
-            let finalIndex = displayedSongs.firstIndex(of: draggingSong)
-        else {
-            return false
-        }
-
-        commitMove(draggingSong, finalIndex)
-        self.draggingSong = nil
-        return true
     }
 }
 

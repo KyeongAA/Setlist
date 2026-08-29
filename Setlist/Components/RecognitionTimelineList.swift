@@ -14,6 +14,8 @@ struct RecognitionTimelineList<Footer: View>: View {
     var moveSongs: ([SetlistSong], IndexSet, Int) -> Void = { _, _, _ in }
 
     @State private var displayedSongs: [SetlistSong]
+    @State private var reorderSession = SongReorderSession()
+    @State private var songRowCenters: [String: CGFloat] = [:]
 
     private let rowHeight: CGFloat = 48
     private let gapHeight: CGFloat = 122
@@ -50,14 +52,13 @@ struct RecognitionTimelineList<Footer: View>: View {
     var body: some View {
         ScrollViewReader { scrollProxy in
             List {
-                ForEach(displayedSongs) { song in
+                ForEach(displayedSongs, id: \.stableID) { song in
                     ForEach(gaps(before: song)) { gap in
                         gapRow(gap)
                     }
 
                     songRow(song)
                 }
-                .onMove(perform: moveDisplayedSongs)
 
                 ForEach(trailingGaps) { gap in
                     gapRow(gap)
@@ -86,6 +87,9 @@ struct RecognitionTimelineList<Footer: View>: View {
             .frame(height: fillsAvailableHeight ? nil : timelineHeight)
             .frame(maxHeight: fillsAvailableHeight ? .infinity : nil)
             .environment(\.defaultMinListRowHeight, rowHeight)
+            .onPreferenceChange(SongRowCenterPreferenceKey.self) { centers in
+                songRowCenters = centers
+            }
             .onChange(of: songs) { oldSongs, newSongs in
                 guard newSongs != displayedSongs else { return }
                 displayedSongs = newSongs
@@ -93,7 +97,7 @@ struct RecognitionTimelineList<Footer: View>: View {
                 guard
                     automaticallyScrollsToLatest,
                     newSongs.count > oldSongs.count,
-                    let latestSongID = newSongs.last?.id
+                    let latestSongID = newSongs.last?.stableID
                 else {
                     return
                 }
@@ -117,9 +121,17 @@ struct RecognitionTimelineList<Footer: View>: View {
     private func songRow(_ song: SetlistSong) -> some View {
         SongRow(
             song: song,
-            accessory: .handle
+            accessory: .handle,
+            reorderChanged: { value in
+                updateReorder(
+                    of: song,
+                    locationY: value.location.y
+                )
+            },
+            reorderEnded: finishReorder
         )
-        .id(song.id)
+        .id(song.stableID)
+        .measuresSongRowCenter(id: song.stableID)
         .contentShape(Rectangle())
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
             Button(role: .destructive) {
@@ -160,18 +172,34 @@ struct RecognitionTimelineList<Footer: View>: View {
         return songsHeight + gapsHeight + spacingHeight
     }
 
-    private func moveDisplayedSongs(
-        from offsets: IndexSet,
-        to destination: Int
+    private func updateReorder(
+        of song: SetlistSong,
+        locationY: CGFloat
     ) {
-        let previousSongs = displayedSongs
+        guard let transition = reorderSession.transition(
+            for: song,
+            locationY: locationY,
+            displayedSongs: displayedSongs,
+            rowCenters: songRowCenters
+        ) else {
+            return
+        }
+
         withAnimation(.snappy) {
             displayedSongs.move(
-                fromOffsets: offsets,
-                toOffset: destination
+                fromOffsets: transition.offsets,
+                toOffset: transition.destination
             )
         }
-        moveSongs(previousSongs, offsets, destination)
+    }
+
+    private func finishReorder() {
+        guard let move = reorderSession.finish(
+            displayedSongs: displayedSongs
+        ) else {
+            return
+        }
+        moveSongs(move.songs, move.offsets, move.destination)
     }
 
     private func scroll<ID: Hashable>(
