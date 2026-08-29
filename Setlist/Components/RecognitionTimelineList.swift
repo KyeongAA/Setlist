@@ -1,5 +1,4 @@
 import SwiftUI
-import UniformTypeIdentifiers
 
 struct RecognitionTimelineList<Footer: View>: View {
     let songs: [SetlistSong]
@@ -15,7 +14,6 @@ struct RecognitionTimelineList<Footer: View>: View {
     var moveSongs: ([SetlistSong], IndexSet, Int) -> Void = { _, _, _ in }
 
     @State private var displayedSongs: [SetlistSong]
-    @State private var draggingSong: SetlistSong?
 
     private let rowHeight: CGFloat = 48
     private let gapHeight: CGFloat = 122
@@ -59,6 +57,7 @@ struct RecognitionTimelineList<Footer: View>: View {
 
                     songRow(song)
                 }
+                .onMove(perform: moveDisplayedSongs)
 
                 ForEach(trailingGaps) { gap in
                     gapRow(gap)
@@ -87,6 +86,7 @@ struct RecognitionTimelineList<Footer: View>: View {
             .frame(height: fillsAvailableHeight ? nil : timelineHeight)
             .frame(maxHeight: fillsAvailableHeight ? .infinity : nil)
             .environment(\.defaultMinListRowHeight, rowHeight)
+            .environment(\.editMode, .constant(.active))
             .onChange(of: songs) { oldSongs, newSongs in
                 guard newSongs != displayedSongs else { return }
                 displayedSongs = newSongs
@@ -118,25 +118,10 @@ struct RecognitionTimelineList<Footer: View>: View {
     private func songRow(_ song: SetlistSong) -> some View {
         SongRow(
             song: song,
-            accessory: .handle,
-            dragProvider: {
-                draggingSong = song
-                return NSItemProvider(
-                    object: dragIdentifier(for: song) as NSString
-                )
-            }
+            accessory: .none
         )
         .id(song.stableID)
         .contentShape(Rectangle())
-        .onDrop(
-            of: [UTType.text],
-            delegate: SongReorderDropDelegate(
-                targetSong: song,
-                displayedSongs: $displayedSongs,
-                draggingSong: $draggingSong,
-                moveSongs: moveSongs
-            )
-        )
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
             Button(role: .destructive) {
                 deleteSong(song)
@@ -176,8 +161,13 @@ struct RecognitionTimelineList<Footer: View>: View {
         return songsHeight + gapsHeight + spacingHeight
     }
 
-    private func dragIdentifier(for song: SetlistSong) -> String {
-        song.storageID?.uuidString ?? song.stableID
+    private func moveDisplayedSongs(
+        from offsets: IndexSet,
+        to destination: Int
+    ) {
+        let previousSongs = displayedSongs
+        displayedSongs.move(fromOffsets: offsets, toOffset: destination)
+        moveSongs(previousSongs, offsets, destination)
     }
 
     private func scroll<ID: Hashable>(

@@ -1,5 +1,4 @@
 import SwiftUI
-import UniformTypeIdentifiers
 
 struct EditableSongList<Footer: View>: View {
     let songs: [SetlistSong]
@@ -11,7 +10,6 @@ struct EditableSongList<Footer: View>: View {
     var moveSongs: ([SetlistSong], IndexSet, Int) -> Void = { _, _, _ in }
 
     @State private var displayedSongs: [SetlistSong]
-    @State private var draggingSong: SetlistSong?
 
     private let rowHeight: CGFloat = 48
     private let rowSpacing = SetlistSpacing.small
@@ -41,25 +39,10 @@ struct EditableSongList<Footer: View>: View {
                 ForEach(displayedSongs, id: \.stableID) { song in
                     SongRow(
                         song: song,
-                        accessory: .handle,
-                        dragProvider: {
-                            draggingSong = song
-                            return NSItemProvider(
-                                object: dragIdentifier(for: song) as NSString
-                            )
-                        }
+                        accessory: .none
                     )
                     .id(song.stableID)
                     .contentShape(Rectangle())
-                    .onDrop(
-                        of: [UTType.text],
-                        delegate: SongReorderDropDelegate(
-                            targetSong: song,
-                            displayedSongs: $displayedSongs,
-                            draggingSong: $draggingSong,
-                            moveSongs: moveSongs
-                        )
-                    )
                     .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                         Button(role: .destructive) {
                             deleteSong(song)
@@ -71,6 +54,7 @@ struct EditableSongList<Footer: View>: View {
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
                 }
+                .onMove(perform: moveDisplayedSongs)
 
                 footer
                     .listRowInsets(EdgeInsets())
@@ -85,6 +69,7 @@ struct EditableSongList<Footer: View>: View {
             .frame(height: fillsAvailableHeight ? nil : listHeight)
             .frame(maxHeight: fillsAvailableHeight ? .infinity : nil)
             .environment(\.defaultMinListRowHeight, rowHeight)
+            .environment(\.editMode, .constant(.active))
             .onChange(of: songs) { oldSongs, newSongs in
                 guard newSongs != displayedSongs else { return }
                 displayedSongs = newSongs
@@ -117,10 +102,14 @@ struct EditableSongList<Footer: View>: View {
             + CGFloat(visibleRowCount - 1) * rowSpacing
     }
 
-    private func dragIdentifier(for song: SetlistSong) -> String {
-        song.storageID?.uuidString ?? song.stableID
+    private func moveDisplayedSongs(
+        from offsets: IndexSet,
+        to destination: Int
+    ) {
+        let previousSongs = displayedSongs
+        displayedSongs.move(fromOffsets: offsets, toOffset: destination)
+        moveSongs(previousSongs, offsets, destination)
     }
-
 }
 
 extension EditableSongList where Footer == EmptyView {
@@ -142,50 +131,6 @@ extension EditableSongList where Footer == EmptyView {
         ) {
             EmptyView()
         }
-    }
-}
-
-struct SongReorderDropDelegate: DropDelegate {
-    let targetSong: SetlistSong
-    @Binding var displayedSongs: [SetlistSong]
-    @Binding var draggingSong: SetlistSong?
-    let moveSongs: ([SetlistSong], IndexSet, Int) -> Void
-
-    func dropEntered(info: DropInfo) {
-        guard
-            let draggingSong,
-            draggingSong.stableID != targetSong.stableID,
-            let sourceIndex = displayedSongs.firstIndex(where: {
-                $0.stableID == draggingSong.stableID
-            }),
-            let targetIndex = displayedSongs.firstIndex(where: {
-                $0.stableID == targetSong.stableID
-            })
-        else {
-            return
-        }
-
-        let previousSongs = displayedSongs
-        let offsets = IndexSet(integer: sourceIndex)
-        let destination = targetIndex > sourceIndex ? targetIndex + 1 : targetIndex
-
-        withAnimation(.snappy) {
-            displayedSongs.move(
-                fromOffsets: offsets,
-                toOffset: destination
-            )
-        }
-        moveSongs(previousSongs, offsets, destination)
-    }
-
-    func dropUpdated(info: DropInfo) -> DropProposal? {
-        DropProposal(operation: .move)
-    }
-
-    func performDrop(info: DropInfo) -> Bool {
-        guard draggingSong != nil else { return false }
-        self.draggingSong = nil
-        return true
     }
 }
 
