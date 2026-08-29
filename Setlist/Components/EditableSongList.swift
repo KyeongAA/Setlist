@@ -38,7 +38,7 @@ struct EditableSongList<Footer: View>: View {
     var body: some View {
         ScrollViewReader { scrollProxy in
             List {
-                ForEach(displayedSongs) { song in
+                ForEach(displayedSongs, id: \.stableID) { song in
                     SongRow(
                         song: song,
                         accessory: .handle,
@@ -49,7 +49,7 @@ struct EditableSongList<Footer: View>: View {
                             )
                         }
                     )
-                    .id(song.id)
+                    .id(song.stableID)
                     .contentShape(Rectangle())
                     .onDrop(
                         of: [UTType.text],
@@ -92,7 +92,7 @@ struct EditableSongList<Footer: View>: View {
                 guard
                     automaticallyScrollsToLatest,
                     newSongs.count > oldSongs.count,
-                    let latestSongID = newSongs.last?.id
+                    let latestSongID = newSongs.last?.stableID
                 else {
                     return
                 }
@@ -118,12 +118,14 @@ struct EditableSongList<Footer: View>: View {
     }
 
     private func dragIdentifier(for song: SetlistSong) -> String {
-        song.storageID?.uuidString ?? "preview-\(song.id)"
+        song.storageID?.uuidString ?? song.stableID
     }
 
     private func commitMove(_ draggedSong: SetlistSong, finalIndex: Int) {
         guard
-            let sourceIndex = songs.firstIndex(of: draggedSong),
+            let sourceIndex = songs.firstIndex(where: {
+                $0.stableID == draggedSong.stableID
+            }),
             sourceIndex != finalIndex
         else {
             return
@@ -165,9 +167,13 @@ struct SongReorderDropDelegate: DropDelegate {
     func dropEntered(info: DropInfo) {
         guard
             let draggingSong,
-            draggingSong != targetSong,
-            let sourceIndex = displayedSongs.firstIndex(of: draggingSong),
-            let targetIndex = displayedSongs.firstIndex(of: targetSong)
+            draggingSong.stableID != targetSong.stableID,
+            let sourceIndex = displayedSongs.firstIndex(where: {
+                $0.stableID == draggingSong.stableID
+            }),
+            let targetIndex = displayedSongs.firstIndex(where: {
+                $0.stableID == targetSong.stableID
+            })
         else {
             return
         }
@@ -187,7 +193,9 @@ struct SongReorderDropDelegate: DropDelegate {
     func performDrop(info: DropInfo) -> Bool {
         guard
             let draggingSong,
-            let finalIndex = displayedSongs.firstIndex(of: draggingSong)
+            let finalIndex = displayedSongs.firstIndex(where: {
+                $0.stableID == draggingSong.stableID
+            })
         else {
             return false
         }
