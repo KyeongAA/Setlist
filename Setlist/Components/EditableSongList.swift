@@ -10,6 +10,8 @@ struct EditableSongList<Footer: View>: View {
     var moveSongs: ([SetlistSong], IndexSet, Int) -> Void = { _, _, _ in }
 
     @State private var displayedSongs: [SetlistSong]
+    @State private var reorderSession = SongReorderSession()
+    @State private var songRowCenters: [String: CGFloat] = [:]
 
     private let rowHeight: CGFloat = 48
     private let rowSpacing = SetlistSpacing.small
@@ -39,9 +41,17 @@ struct EditableSongList<Footer: View>: View {
                 ForEach(displayedSongs, id: \.stableID) { song in
                     SongRow(
                         song: song,
-                        accessory: .none
+                        accessory: .handle,
+                        reorderChanged: { value in
+                            updateReorder(
+                                of: song,
+                                locationY: value.location.y
+                            )
+                        },
+                        reorderEnded: finishReorder
                     )
                     .id(song.stableID)
+                    .measuresSongRowCenter(id: song.stableID)
                     .contentShape(Rectangle())
                     .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                         Button(role: .destructive) {
@@ -54,7 +64,6 @@ struct EditableSongList<Footer: View>: View {
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
                 }
-                .onMove(perform: moveDisplayedSongs)
 
                 footer
                     .listRowInsets(EdgeInsets())
@@ -69,7 +78,9 @@ struct EditableSongList<Footer: View>: View {
             .frame(height: fillsAvailableHeight ? nil : listHeight)
             .frame(maxHeight: fillsAvailableHeight ? .infinity : nil)
             .environment(\.defaultMinListRowHeight, rowHeight)
-            .environment(\.editMode, .constant(.active))
+            .onPreferenceChange(SongRowCenterPreferenceKey.self) { centers in
+                songRowCenters = centers
+            }
             .onChange(of: songs) { oldSongs, newSongs in
                 guard newSongs != displayedSongs else { return }
                 displayedSongs = newSongs
@@ -102,13 +113,34 @@ struct EditableSongList<Footer: View>: View {
             + CGFloat(visibleRowCount - 1) * rowSpacing
     }
 
-    private func moveDisplayedSongs(
-        from offsets: IndexSet,
-        to destination: Int
+    private func updateReorder(
+        of song: SetlistSong,
+        locationY: CGFloat
     ) {
-        let previousSongs = displayedSongs
-        displayedSongs.move(fromOffsets: offsets, toOffset: destination)
-        moveSongs(previousSongs, offsets, destination)
+        guard let transition = reorderSession.transition(
+            for: song,
+            locationY: locationY,
+            displayedSongs: displayedSongs,
+            rowCenters: songRowCenters
+        ) else {
+            return
+        }
+
+        withAnimation(.snappy) {
+            displayedSongs.move(
+                fromOffsets: transition.offsets,
+                toOffset: transition.destination
+            )
+        }
+    }
+
+    private func finishReorder() {
+        guard let move = reorderSession.finish(
+            displayedSongs: displayedSongs
+        ) else {
+            return
+        }
+        moveSongs(move.songs, move.offsets, move.destination)
     }
 }
 

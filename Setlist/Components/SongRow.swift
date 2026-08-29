@@ -9,7 +9,8 @@ enum SongRowAccessory {
 struct SongRow: View {
     let song: SetlistSong
     var accessory: SongRowAccessory = .none
-    var dragProvider: (() -> NSItemProvider)?
+    var reorderChanged: ((DragGesture.Value) -> Void)?
+    var reorderEnded: (() -> Void)?
     var action: () -> Void = {}
 
     var body: some View {
@@ -49,9 +50,16 @@ struct SongRow: View {
     private var accessoryView: some View {
         switch accessory {
         case .handle:
-            if let dragProvider {
+            if let reorderChanged, let reorderEnded {
                 handleImage
-                    .onDrag(dragProvider)
+                    .highPriorityGesture(
+                        DragGesture(
+                            minimumDistance: SetlistSpacing.xxs,
+                            coordinateSpace: .global
+                        )
+                        .onChanged(reorderChanged)
+                        .onEnded { _ in reorderEnded() }
+                    )
             } else {
                 handleImage
             }
