@@ -431,7 +431,7 @@ final class ShazamRecognitionService: NSObject, ObservableObject {
             max((decibels - noiseFloor) / (loudLevel - noiseFloor), 0),
             1
         )
-        return Double(pow(normalized, 0.72))
+        return Double(pow(normalized, 1.35))
     }
 
     private func accept(match: SHMatch) {

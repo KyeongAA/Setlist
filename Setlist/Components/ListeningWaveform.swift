@@ -76,7 +76,7 @@ struct ListeningWaveform: View {
     private var inputLevelScale: CGFloat {
         guard let inputLevel else { return 1 }
         let clampedLevel = min(max(inputLevel, 0), 1)
-        return 0.45 + CGFloat(clampedLevel) * 0.95
+        return 0.25 + CGFloat(clampedLevel) * 1.75
     }
 }
 
