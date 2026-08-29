@@ -20,8 +20,11 @@ struct ShazamRecognitionGap: Equatable, Sendable {
 
 enum ShazamRecognitionState: Equatable {
     case idle
+    case preparing
     case listening
     case paused
+    case interrupted
+    case recovering
     case microphonePermissionDenied
     case failed
 }
@@ -30,7 +33,6 @@ enum ShazamRecognitionState: Equatable {
 final class ShazamRecognitionService: NSObject, ObservableObject {
     @Published private(set) var state: ShazamRecognitionState = .idle
     @Published private(set) var latestMatch: ShazamRecognizedTrack?
-    @Published private(set) var latestGap: ShazamRecognitionGap?
     @Published private(set) var elapsedDuration: TimeInterval = 0
     @Published private(set) var activeGapStartTime: TimeInterval?
 
@@ -38,8 +40,6 @@ final class ShazamRecognitionService: NSObject, ObservableObject {
     private var mixerNode = AVAudioMixerNode()
     private var shazamSession = SHSession()
     private var isAudioEngineConfigured = false
-    private var lastMatchID: String?
-    private var lastMatchDate: Date?
     private let gapThreshold: TimeInterval
     private var accumulatedListeningDuration: TimeInterval = 0
     private var listeningStartedAt: Date?
@@ -47,9 +47,10 @@ final class ShazamRecognitionService: NSObject, ObservableObject {
     private var gapThresholdTask: Task<Void, Never>?
     private var elapsedUpdateTask: Task<Void, Never>?
     private var recoveryTask: Task<Void, Never>?
+    private var startRequestID: UUID?
     private var shouldResumeAfterInterruption = false
 
-    init(gapThreshold: TimeInterval = 180) {
+    init(gapThreshold: TimeInterval = 60) {
         self.gapThreshold = gapThreshold
         super.init()
         shazamSession.delegate = self
@@ -67,10 +68,15 @@ final class ShazamRecognitionService: NSObject, ObservableObject {
     }
 
     func start() async {
-        guard state != .listening else { return }
+        guard !state.hasActiveSession else { return }
+        let requestID = UUID()
+        startRequestID = requestID
+        state = .preparing
 
         let permissionGranted = await AVAudioApplication.requestRecordPermission()
+        guard startRequestID == requestID, state == .preparing else { return }
         guard permissionGranted else {
+            startRequestID = nil
             state = .microphonePermissionDenied
             return
         }
@@ -81,10 +87,12 @@ final class ShazamRecognitionService: NSObject, ObservableObject {
             audioEngine.prepare()
             try audioEngine.start()
             listeningStartedAt = .now
+            startRequestID = nil
             state = .listening
             startElapsedUpdates()
             scheduleGapThresholdIfNeeded()
         } catch {
+            guard startRequestID == requestID else { return }
             failRecognition()
         }
     }
@@ -92,28 +100,30 @@ final class ShazamRecognitionService: NSObject, ObservableObject {
     func toggleListening() async {
         switch state {
         case .listening:
-            updateElapsedDuration()
-            listeningStartedAt = nil
-            elapsedUpdateTask?.cancel()
-            gapThresholdTask?.cancel()
-            state = .paused
-            tearDownRecognitionPipeline()
-            deactivateAudioSession()
-        case .paused, .idle, .failed:
+            pauseRecognition()
+        case .paused, .idle, .microphonePermissionDenied, .failed:
             await start()
-        case .microphonePermissionDenied:
-            return
+        case .preparing, .interrupted, .recovering:
+            pauseRecognition()
         }
     }
 
     func setListening(_ shouldListen: Bool) async {
         if shouldListen {
-            guard state != .listening else { return }
+            guard !state.hasActiveSession else { return }
             await start()
         } else {
-            guard state == .listening else { return }
+            guard state.hasActiveSession else { return }
             await toggleListening()
         }
+    }
+
+    func confirmAcceptedMatch(
+        at recognitionTime: TimeInterval
+    ) -> ShazamRecognitionGap? {
+        let gap = finishActiveGap(at: recognitionTime)
+        resetUnmatchedPeriod()
+        return gap
     }
 
     @discardableResult
@@ -123,13 +133,14 @@ final class ShazamRecognitionService: NSObject, ObservableObject {
         elapsedUpdateTask?.cancel()
         gapThresholdTask?.cancel()
         recoveryTask?.cancel()
+        startRequestID = nil
         shouldResumeAfterInterruption = false
 
         var completedGap: ShazamRecognitionGap?
         if let unmatchedStartTime,
            elapsedDuration - unmatchedStartTime >= gapThreshold {
             activateGapIfNeeded()
-            completedGap = finishActiveGap(at: elapsedDuration, publish: false)
+            completedGap = finishActiveGap(at: elapsedDuration)
         }
         resetUnmatchedPeriod()
 
@@ -137,6 +148,21 @@ final class ShazamRecognitionService: NSObject, ObservableObject {
         deactivateAudioSession()
         state = .idle
         return completedGap
+    }
+
+    private func pauseRecognition() {
+        if listeningStartedAt != nil {
+            updateElapsedDuration()
+        }
+        listeningStartedAt = nil
+        elapsedUpdateTask?.cancel()
+        gapThresholdTask?.cancel()
+        recoveryTask?.cancel()
+        startRequestID = nil
+        shouldResumeAfterInterruption = false
+        state = .paused
+        tearDownRecognitionPipeline()
+        deactivateAudioSession()
     }
 
     private func configureAudioSession() throws {
@@ -222,6 +248,7 @@ final class ShazamRecognitionService: NSObject, ObservableObject {
             gapThresholdTask?.cancel()
             shouldResumeAfterInterruption = true
             tearDownRecognitionPipeline()
+            state = .interrupted
 
         case .ended:
             let options = AVAudioSession.InterruptionOptions(rawValue: rawOptions)
@@ -259,8 +286,9 @@ final class ShazamRecognitionService: NSObject, ObservableObject {
     }
 
     private func schedulePipelineRecovery() {
-        guard state == .listening else { return }
+        guard state == .listening || state == .interrupted else { return }
         recoveryTask?.cancel()
+        state = .recovering
         recoveryTask = Task { @MainActor [weak self] in
             do {
                 try await Task.sleep(for: .milliseconds(250))
@@ -274,7 +302,7 @@ final class ShazamRecognitionService: NSObject, ObservableObject {
     }
 
     private func recoverRecognitionPipeline() throws {
-        guard state == .listening else { return }
+        guard state == .recovering else { return }
 
         if listeningStartedAt != nil {
             updateElapsedDuration()
@@ -289,6 +317,7 @@ final class ShazamRecognitionService: NSObject, ObservableObject {
         try audioEngine.start()
 
         listeningStartedAt = .now
+        state = .listening
         startElapsedUpdates()
         scheduleGapThresholdIfNeeded()
     }
@@ -301,6 +330,7 @@ final class ShazamRecognitionService: NSObject, ObservableObject {
         elapsedUpdateTask?.cancel()
         gapThresholdTask?.cancel()
         recoveryTask?.cancel()
+        startRequestID = nil
         shouldResumeAfterInterruption = false
         tearDownRecognitionPipeline()
         deactivateAudioSession()
@@ -373,19 +403,8 @@ final class ShazamRecognitionService: NSObject, ObservableObject {
 
         updateElapsedDuration()
         let recognitionTime = elapsedDuration
-        _ = finishActiveGap(at: recognitionTime)
-        resetUnmatchedPeriod()
 
         let now = Date.now
-        let matchID = item.shazamID ?? "\(title)|\(artistName)"
-        if lastMatchID == matchID,
-           let lastMatchDate,
-           now.timeIntervalSince(lastMatchDate) < 60 {
-            return
-        }
-
-        lastMatchID = matchID
-        lastMatchDate = now
         latestMatch = ShazamRecognizedTrack(
             title: title,
             artistName: artistName,
@@ -435,19 +454,13 @@ final class ShazamRecognitionService: NSObject, ObservableObject {
         activeGapStartTime = unmatchedStartTime
     }
 
-    private func finishActiveGap(
-        at endTime: TimeInterval,
-        publish: Bool = true
-    ) -> ShazamRecognitionGap? {
+    private func finishActiveGap(at endTime: TimeInterval) -> ShazamRecognitionGap? {
         guard let startTime = activeGapStartTime, endTime > startTime else { return nil }
         let gap = ShazamRecognitionGap(
             id: UUID(),
             startTime: startTime,
             endTime: endTime
         )
-        if publish {
-            latestGap = gap
-        }
         activeGapStartTime = nil
         return gap
     }
@@ -485,6 +498,17 @@ final class ShazamRecognitionService: NSObject, ObservableObject {
                     return
                 }
             }
+        }
+    }
+}
+
+private extension ShazamRecognitionState {
+    var hasActiveSession: Bool {
+        switch self {
+        case .preparing, .listening, .interrupted, .recovering:
+            true
+        case .idle, .paused, .microphonePermissionDenied, .failed:
+            false
         }
     }
 }

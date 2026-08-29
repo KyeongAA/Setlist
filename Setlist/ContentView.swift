@@ -31,16 +31,15 @@ struct ContentView: View {
             .onChange(of: recognizer.latestMatch) { _, match in
                 guard let match, let recordingConcert else { return }
                 let recognizedSongNumber = recordingConcert.orderedSongs.count + 1
-                addRecognizedTrack(match, to: recordingConcert)
+                guard addRecognizedTrack(match, to: recordingConcert) else { return }
+                if let gap = recognizer.confirmAcceptedMatch(at: match.recognitionTime) {
+                    addRecognitionGap(gap, to: recordingConcert)
+                }
                 liveActivityManager.recognized(
                     songNumber: recognizedSongNumber,
                     title: match.title,
                     artist: match.artistName
                 )
-            }
-            .onChange(of: recognizer.latestGap) { _, gap in
-                guard let gap, let recordingConcert else { return }
-                addRecognitionGap(gap, to: recordingConcert)
             }
             .onChange(of: recognizer.state) { _, state in
                 synchronizeLiveActivity(with: state)
@@ -75,9 +74,7 @@ struct ContentView: View {
                     photoData: concert.photoData,
                     placeholderType: concert.placeholderPosterType,
                     songs: concert.orderedSongs.map { SetlistSong(record: $0) },
-                    recognitionGaps: concert.recognitionGaps
-                        .sorted { $0.startTime < $1.startTime }
-                        .map { SetlistRecognitionGap(record: $0) },
+                    recognitionGaps: recognitionTimelineGaps(for: concert),
                     goBack: {
                         destination = .home
                         presentedRecognitionID = concertID
@@ -204,6 +201,7 @@ struct ContentView: View {
                 recognizer: recognizer,
                 initialRecognitionDuration: concert.recognitionDuration,
                 songs: concert.orderedSongs.map { SetlistSong(record: $0) },
+                recognitionGaps: recognitionTimelineGaps(for: concert),
                 addSpotifyTrack: { track in
                     addSpotifyTrack(track, to: concert)
                 },
@@ -261,9 +259,9 @@ struct ContentView: View {
         guard recordingConcert != nil else { return nil }
 
         switch recognizer.state {
-        case .listening:
+        case .preparing, .listening, .recovering:
             return .listening
-        case .idle, .paused, .microphonePermissionDenied, .failed:
+        case .idle, .paused, .interrupted, .microphonePermissionDenied, .failed:
             return .paused
         }
     }
@@ -341,7 +339,7 @@ struct ContentView: View {
                 concertID: recordingConcert.id,
                 nextSongNumber: nextSongNumber
             )
-        case .paused:
+        case .paused, .interrupted:
             if liveActivityManager.isActive {
                 liveActivityManager.pause(nextSongNumber: nextSongNumber)
             } else if allowsStarting {
@@ -354,6 +352,8 @@ struct ContentView: View {
                 recognizer.elapsedDuration,
                 in: recordingConcert
             )
+        case .preparing, .recovering:
+            break
         case .idle, .microphonePermissionDenied, .failed:
             liveActivityManager.end()
         }
@@ -436,10 +436,16 @@ struct ContentView: View {
         }
     }
 
+    @discardableResult
     private func addRecognizedTrack(
         _ track: ShazamRecognizedTrack,
         to concert: ConcertRecord
-    ) {
+    ) -> Bool {
+        if let shazamID = track.shazamID,
+           concert.orderedSongs.last?.shazamID == shazamID {
+            return false
+        }
+
         do {
             try ConcertStore(modelContext: modelContext).addRecognizedSong(
                 to: concert,
@@ -451,8 +457,10 @@ struct ContentView: View {
                 recognitionStartTime: nil,
                 recognitionEndTime: track.recognitionTime
             )
+            return true
         } catch {
             assertionFailure("Failed to add recognized track: \(error)")
+            return false
         }
     }
 
@@ -520,6 +528,31 @@ struct ContentView: View {
         } catch {
             assertionFailure("Failed to add recognition gap: \(error)")
         }
+    }
+
+    private func recognitionTimelineGaps(
+        for concert: ConcertRecord
+    ) -> [SetlistRecognitionGap] {
+        let orderedSongs = concert.orderedSongs
+
+        return concert.recognitionGaps
+            .sorted { $0.startTime < $1.startTime }
+            .map { gap in
+                let followingSong = orderedSongs.first { song in
+                    guard
+                        song.source == .shazam,
+                        let recognitionEndTime = song.recognitionEndTime
+                    else {
+                        return false
+                    }
+                    return recognitionEndTime >= gap.endTime
+                }
+
+                return SetlistRecognitionGap(
+                    record: gap,
+                    followingSongStorageID: followingSong?.id
+                )
+            }
     }
 
     private func updateRecognitionDuration(

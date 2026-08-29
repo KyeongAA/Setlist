@@ -332,45 +332,30 @@ struct ConcertCompleteScreen: View {
                         }
                         .padding(.top, SetlistSpacing.large)
 
-                        if recognitionGaps.isEmpty {
-                            EditableSongList(
-                                songs: songs,
-                                deleteSong: deleteSong,
-                                moveSongs: moveSongs
-                            )
-                            .padding(.top, 28)
-                        } else {
+                        if !recognitionGaps.isEmpty {
                             Text("확인이 필요한 구간 \(recognitionGaps.count)개")
                                 .setlistTextStyle(.utilityStatus)
                                 .foregroundStyle(SetlistColor.semanticWarningContent)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(.top, 28)
-
-                            EditableSongList(
-                                songs: Array(songs.prefix(3)),
-                                deleteSong: deleteSong,
-                                moveSongs: moveSongs
-                            )
-                            .padding(.top, SetlistSpacing.medium)
-
-                            VStack(spacing: SetlistSpacing.small) {
-                                ForEach(recognitionGaps) { gap in
-                                    MissingCard(
-                                        startTime: gap.startTime,
-                                        endTime: gap.endTime,
-                                        action: presentSearch
-                                    )
-                                }
-                            }
-                            .padding(.top, SetlistSpacing.large)
-
-                            EditableSongList(
-                                songs: Array(songs.dropFirst(3)),
-                                deleteSong: deleteSong,
-                                moveSongs: moveSongs
-                            )
-                            .padding(.top, SetlistSpacing.large)
                         }
+
+                        RecognitionTimelineList(
+                            songs: songs,
+                            gaps: recognitionGaps,
+                            includesFooter: false,
+                            gapAction: presentSearch,
+                            deleteSong: deleteSong,
+                            moveSongs: moveSongs
+                        ) {
+                            EmptyView()
+                        }
+                        .padding(
+                            .top,
+                            recognitionGaps.isEmpty
+                                ? 28
+                                : SetlistSpacing.medium
+                        )
 
                         SmallButton(title: "곡 추가", showsPlus: true, action: presentSearch)
                             .padding(.top, SetlistSpacing.large)

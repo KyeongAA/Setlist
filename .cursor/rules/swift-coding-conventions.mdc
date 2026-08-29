@@ -1,0 +1,40 @@
+---
+description: Setlist 프로젝트 Swift 및 SwiftUI 코딩 컨벤션
+globs: "**/*.swift"
+alwaysApply: false
+---
+
+# Swift 코딩 컨벤션
+
+- 한 줄은 최대 120자로 작성한다.
+- 상속하지 않는 클래스는 `final`로 선언한다.
+- 내부에서만 사용하는 선언은 `private`로 제한하고 `fileprivate`는 꼭 필요한 경우에만 쓴다.
+- Optional binding은 shorthand syntax를 쓰고 force unwrapping은 피한다.
+- 함수 파라미터가 3개 이상이거나 120자를 넘으면 파라미터마다 줄바꿈한다.
+- 빈 컬렉션은 `var items: [Item] = []`, `var values: [String: Int] = [:]` 형태로 선언한다.
+- 클로저 파라미터에는 괄호를 쓰지 않는다: `{ item, index in ... }`.
+- 단순 반환·대입은 가독성을 해치지 않으면 삼항 연산자를 사용한다.
+- `guard let`은 shorthand syntax를 사용한다. 함수 첫 줄이 아니라면 위아래를 한 줄 띄운다.
+- 단순 `switch` 반환은 `case .value: return result`로 한 줄에 쓸 수 있다.
+- case 내부에 로직이 있으면 case 본문을 개행하고 다음 case 전을 한 줄 띄운다.
+
+# 구조와 주석
+
+- `// MARK: - Properties`, `Initializer`, `Body`, `Subviews` 순으로 구분하고 MARK 위아래를 띄운다.
+- 인라인 주석은 피하고 재사용 API에는 문서화 주석을 사용한다.
+- Apple 프레임워크를 먼저, 서드파티를 다음 문단에 두고 각 그룹을 알파벳순으로 정렬한다.
+- 재사용·상태·외부 입력이 필요한 하위 뷰는 별도 `struct`로 분리한다.
+- 단순 내부 하위 뷰는 `private` 명사형 computed property로 만들고 extension에서 관리한다.
+- `body` 깊이는 3단계를 넘기지 않으며 논리적인 `header/content/footer` 흐름을 유지한다.
+- Stack의 `alignment`와 `spacing`은 기본값이어도 명시한다.
+- 단순 확장은 `Spacer()`보다 `.frame(maxWidth/maxHeight: .infinity)`를 사용한다.
+- 버튼은 `Button { ... } label: { ... }` 문법을 사용한다.
+
+# 이름
+
+- 타입은 PascalCase, 변수와 함수는 lowerCamelCase를 사용한다.
+- 변수는 의미가 분명한 명사로 쓰고 단수·복수를 구분한다.
+- 약어는 피하되 `Id`, `Url`은 허용한다.
+- Bool은 `is/has/can/should` + 상태·명사 형태로 작성하고 `is` + 동사원형은 금지한다.
+- 함수는 동사 + 목적어로 작성한다.
+- 네트워크 함수는 `fetch`, `submit`, `update`, `remove` 같은 의도 중심 동사를 사용한다.
