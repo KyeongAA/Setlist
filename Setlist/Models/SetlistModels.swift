@@ -52,6 +52,19 @@ struct SetlistRecognitionGap: Identifiable, Hashable {
     let id: UUID
     let startTime: TimeInterval
     let endTime: TimeInterval
+    let followingSongStorageID: UUID?
+
+    init(
+        id: UUID,
+        startTime: TimeInterval,
+        endTime: TimeInterval,
+        followingSongStorageID: UUID? = nil
+    ) {
+        self.id = id
+        self.startTime = startTime
+        self.endTime = endTime
+        self.followingSongStorageID = followingSongStorageID
+    }
 }
 
 extension SetlistSong {
@@ -91,11 +104,15 @@ extension SetlistConcert {
 }
 
 extension SetlistRecognitionGap {
-    init(record: RecognitionGapRecord) {
+    init(
+        record: RecognitionGapRecord,
+        followingSongStorageID: UUID? = nil
+    ) {
         self.init(
             id: record.id,
             startTime: record.startTime,
-            endTime: record.endTime
+            endTime: record.endTime,
+            followingSongStorageID: followingSongStorageID
         )
     }
 }

@@ -1,12 +1,23 @@
 import SwiftUI
+import UIKit
+
+private enum RecognitionAlert: Identifiable, Hashable {
+    case microphonePermissionDenied
+    case failed
+
+    var id: Self { self }
+}
 
 struct RecognitionScreen: View {
+    @Environment(\.openURL) private var openURL
     @State private var isSearchPresented = false
     @State private var isEndConfirmationPresented = false
+    @State private var recognitionAlert: RecognitionAlert?
     @ObservedObject var recognizer: ShazamRecognitionService
 
     var initialRecognitionDuration: TimeInterval = 0
     var songs: [SetlistSong] = SetlistSong.sampleSongs
+    var recognitionGaps: [SetlistRecognitionGap] = []
     var addSong: () -> Void = {}
     var addSpotifyTrack: (SpotifyTrack) -> Void = { _ in }
     var deleteSong: (SetlistSong) -> Void = { _ in }
@@ -25,16 +36,20 @@ struct RecognitionScreen: View {
                 SheetHandle()
                     .padding(.top, SetlistSpacing.xs)
 
-                Text("인식 중  ·  \(elapsedTimeString(recognizer.elapsedDuration))")
+                Text(recognitionStatusText)
                     .setlistTextStyle(.utilityStatus)
-                    .foregroundStyle(SetlistColor.semanticSuccessContent)
+                    .foregroundStyle(recognitionStatusColor)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.top, 26)
 
-                EditableSongList(
+                RecognitionTimelineList(
                     songs: songs,
+                    gaps: recognitionGaps,
+                    activeGapStartTime: recognizer.activeGapStartTime,
+                    activeGapEndTime: recognizer.elapsedDuration,
                     fillsAvailableHeight: true,
                     automaticallyScrollsToLatest: true,
+                    gapAction: presentSearch,
                     deleteSong: deleteSong,
                     moveSongs: moveSongs
                 ) {
@@ -64,6 +79,37 @@ struct RecognitionScreen: View {
                 endRecognition()
             }
         }
+        .alert(item: $recognitionAlert) { alert in
+            switch alert {
+            case .microphonePermissionDenied:
+                Alert(
+                    title: Text("마이크 권한이 필요해요"),
+                    message: Text(
+                        "설정에서 마이크 접근을 허용하면 음악 인식을 시작할 수 있어요."
+                    ),
+                    primaryButton: .default(Text("설정 열기")) {
+                        guard let settingsURL = URL(
+                            string: UIApplication.openSettingsURLString
+                        ) else {
+                            return
+                        }
+                        openURL(settingsURL)
+                    },
+                    secondaryButton: .cancel(Text("취소"))
+                )
+            case .failed:
+                Alert(
+                    title: Text("음악 인식을 시작할 수 없어요"),
+                    message: Text("오디오 연결을 확인한 뒤 다시 시도해 주세요."),
+                    primaryButton: .default(Text("다시 시도")) {
+                        Task {
+                            await recognizer.start()
+                        }
+                    },
+                    secondaryButton: .cancel(Text("취소"))
+                )
+            }
+        }
         .task {
             guard automaticallyStartsRecognition else { return }
             if recognizer.state == .idle {
@@ -73,6 +119,16 @@ struct RecognitionScreen: View {
         }
         .onDisappear {
             updateRecognitionDuration(recognizer.elapsedDuration)
+        }
+        .onChange(of: recognizer.state) { _, state in
+            switch state {
+            case .microphonePermissionDenied:
+                recognitionAlert = .microphonePermissionDenied
+            case .failed:
+                recognitionAlert = .failed
+            default:
+                break
+            }
         }
     }
 
@@ -91,14 +147,6 @@ struct RecognitionScreen: View {
 
     private var recognitionListFooter: some View {
         VStack(spacing: SetlistSpacing.large) {
-            if let gapStartTime = recognizer.activeGapStartTime {
-                MissingCard(
-                    startTime: gapStartTime,
-                    endTime: recognizer.elapsedDuration,
-                    action: presentSearch
-                )
-            }
-
             ListeningWaveform(isAnimating: recognizer.state == .listening)
 
             SmallButton(title: "곡 추가", showsPlus: true, action: presentSearch)
@@ -110,7 +158,7 @@ struct RecognitionScreen: View {
     private var bottomActions: some View {
         ZStack {
             RoundActionButton(
-                icon: recognizer.state == .listening ? .pause : .microphone,
+                icon: showsPauseAction ? .pause : .microphone,
                 size: 64,
                 action: toggleRecognition
             )
@@ -131,6 +179,52 @@ struct RecognitionScreen: View {
             }
         }
         .frame(maxWidth: .infinity)
+    }
+
+    private var recognitionStatusText: String {
+        let elapsed = elapsedTimeString(recognizer.elapsedDuration)
+
+        switch recognizer.state {
+        case .idle, .preparing:
+            return "인식을 준비하고 있어요  ·  \(elapsed)"
+        case .listening:
+            if recognizer.activeGapStartTime != nil {
+                return "인식 불안정 구간  ·  \(elapsed)"
+            }
+            return "인식 중  ·  \(elapsed)"
+        case .paused:
+            return "인식을 일시정지했어요  ·  \(elapsed)"
+        case .interrupted:
+            return "다른 오디오 사용으로 잠시 중단됐어요  ·  \(elapsed)"
+        case .recovering:
+            return "인식을 다시 연결하고 있어요  ·  \(elapsed)"
+        case .microphonePermissionDenied:
+            return "마이크 권한이 필요해요  ·  \(elapsed)"
+        case .failed:
+            return "음악 인식을 시작할 수 없어요  ·  \(elapsed)"
+        }
+    }
+
+    private var recognitionStatusColor: Color {
+        switch recognizer.state {
+        case .listening where recognizer.activeGapStartTime != nil:
+            SetlistColor.semanticWarningContent
+        case .listening:
+            SetlistColor.semanticSuccessContent
+        case .microphonePermissionDenied, .failed:
+            SetlistColor.semanticErrorContent
+        case .idle, .preparing, .paused, .interrupted, .recovering:
+            SetlistColor.textSecondary
+        }
+    }
+
+    private var showsPauseAction: Bool {
+        switch recognizer.state {
+        case .preparing, .listening, .interrupted, .recovering:
+            true
+        case .idle, .paused, .microphonePermissionDenied, .failed:
+            false
+        }
     }
 
     private func elapsedTimeString(_ duration: TimeInterval) -> String {

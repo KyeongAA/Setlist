@@ -156,7 +156,7 @@ extension EditableSongList where Footer == EmptyView {
     }
 }
 
-private struct SongReorderDropDelegate: DropDelegate {
+struct SongReorderDropDelegate: DropDelegate {
     let targetSong: SetlistSong
     @Binding var displayedSongs: [SetlistSong]
     @Binding var draggingSong: SetlistSong?
