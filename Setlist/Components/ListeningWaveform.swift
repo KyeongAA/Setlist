@@ -11,6 +11,7 @@ struct ListeningWaveform: View {
     @State private var accumulatedPauseDuration: TimeInterval = 0
 
     let isAnimating: Bool
+    var inputLevel: Double? = nil
     var height: CGFloat = 48
     var backgroundColor = Color(
         red: 25 / 255,
@@ -37,8 +38,10 @@ struct ListeningWaveform: View {
                 animationTime: animationTime(at: context.date),
                 barHeightScale: barHeightScale,
                 barStrokeWidth: barStrokeWidth,
-                motionStyle: motionStyle
+                motionStyle: motionStyle,
+                inputLevelScale: inputLevelScale
             )
+            .animation(.easeOut(duration: 0.18), value: inputLevelScale)
         }
         .frame(maxWidth: .infinity)
         .frame(height: height)
@@ -69,17 +72,29 @@ struct ListeningWaveform: View {
         let visibleDate = pausedAt ?? timelineDate
         return visibleDate.timeIntervalSinceReferenceDate - accumulatedPauseDuration
     }
+
+    private var inputLevelScale: CGFloat {
+        guard let inputLevel else { return 1 }
+        let clampedLevel = min(max(inputLevel, 0), 1)
+        return 0.25 + CGFloat(clampedLevel) * 1.75
+    }
 }
 
-private struct WaveformCanvas: View {
+private struct WaveformCanvas: View, Animatable {
     let animationTime: TimeInterval
     let barHeightScale: CGFloat
     let barStrokeWidth: CGFloat
     let motionStyle: WaveformMotionStyle
+    var inputLevelScale: CGFloat
 
     private let barHeights: [CGFloat] = [6, 10, 12, 15, 17]
     private let barSpacing: CGFloat = 6
     private let minimumHorizontalInset: CGFloat = 12
+
+    var animatableData: CGFloat {
+        get { inputLevelScale }
+        set { inputLevelScale = newValue }
+    }
 
     var body: some View {
         Canvas { context, size in
@@ -140,7 +155,9 @@ private struct WaveformCanvas: View {
         let maximumHeight = barHeights.last ?? 15
         let centerHeight = (minimumHeight + maximumHeight) / 2
         let amplitude = (maximumHeight - minimumHeight) / 2
-        return (centerHeight + amplitude * CGFloat(normalizedHeight)) * barHeightScale
+        return (centerHeight + amplitude * CGFloat(normalizedHeight))
+            * barHeightScale
+            * inputLevelScale
     }
 
     private func randomUnit(for value: Int) -> Double {

@@ -147,7 +147,10 @@ struct RecognitionScreen: View {
 
     private var recognitionListFooter: some View {
         VStack(spacing: SetlistSpacing.large) {
-            ListeningWaveform(isAnimating: recognizer.state == .listening)
+            ListeningWaveform(
+                isAnimating: recognizer.state == .listening,
+                inputLevel: recognizer.inputLevel
+            )
 
             SmallButton(title: "곡 추가", showsPlus: true, action: presentSearch)
         }

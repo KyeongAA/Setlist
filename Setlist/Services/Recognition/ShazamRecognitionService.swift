@@ -1,3 +1,4 @@
+import Accelerate
 import AVFAudio
 import Combine
 import Foundation
@@ -35,6 +36,7 @@ final class ShazamRecognitionService: NSObject, ObservableObject {
     @Published private(set) var latestMatch: ShazamRecognizedTrack?
     @Published private(set) var elapsedDuration: TimeInterval = 0
     @Published private(set) var activeGapStartTime: TimeInterval?
+    @Published private(set) var inputLevel: Double = 0
 
     private var audioEngine = AVAudioEngine()
     private var mixerNode = AVAudioMixerNode()
@@ -367,8 +369,13 @@ final class ShazamRecognitionService: NSObject, ObservableObject {
             onBus: 0,
             bufferSize: 8_192,
             format: outputFormat
-        ) { buffer, audioTime in
+        ) { [weak self] buffer, audioTime in
             session.matchStreamingBuffer(buffer, at: audioTime)
+
+            let inputLevel = Self.normalizedInputLevel(from: buffer)
+            Task { @MainActor [weak self] in
+                self?.updateInputLevel(inputLevel)
+            }
         }
         isAudioEngineConfigured = true
     }
@@ -390,6 +397,41 @@ final class ShazamRecognitionService: NSObject, ObservableObject {
             false,
             options: .notifyOthersOnDeactivation
         )
+    }
+
+    private func updateInputLevel(_ newLevel: Double) {
+        guard state == .listening else { return }
+
+        let smoothingFactor = newLevel > inputLevel ? 0.58 : 0.24
+        inputLevel += (newLevel - inputLevel) * smoothingFactor
+    }
+
+    nonisolated private static func normalizedInputLevel(
+        from buffer: AVAudioPCMBuffer
+    ) -> Double {
+        guard
+            buffer.frameLength > 0,
+            let channelData = buffer.floatChannelData?[0]
+        else {
+            return 0
+        }
+
+        var rootMeanSquare: Float = 0
+        vDSP_rmsqv(
+            channelData,
+            1,
+            &rootMeanSquare,
+            vDSP_Length(buffer.frameLength)
+        )
+
+        let decibels = 20 * log10(max(rootMeanSquare, 0.000_001))
+        let noiseFloor: Float = -60
+        let loudLevel: Float = -6
+        let normalized = min(
+            max((decibels - noiseFloor) / (loudLevel - noiseFloor), 0),
+            1
+        )
+        return Double(pow(normalized, 1.35))
     }
 
     private func accept(match: SHMatch) {
