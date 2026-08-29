@@ -1,5 +1,4 @@
 import SwiftUI
-import UniformTypeIdentifiers
 
 struct RecognitionTimelineList<Footer: View>: View {
     let songs: [SetlistSong]
@@ -15,7 +14,6 @@ struct RecognitionTimelineList<Footer: View>: View {
     var moveSongs: ([SetlistSong], IndexSet, Int) -> Void = { _, _, _ in }
 
     @State private var displayedSongs: [SetlistSong]
-    @State private var draggingSong: SetlistSong?
 
     private let rowHeight: CGFloat = 48
     private let gapHeight: CGFloat = 122
@@ -59,6 +57,7 @@ struct RecognitionTimelineList<Footer: View>: View {
 
                     songRow(song)
                 }
+                .onMove(perform: moveDisplayedSongs)
 
                 ForEach(trailingGaps) { gap in
                     gapRow(gap)
@@ -118,25 +117,10 @@ struct RecognitionTimelineList<Footer: View>: View {
     private func songRow(_ song: SetlistSong) -> some View {
         SongRow(
             song: song,
-            accessory: .handle,
-            dragProvider: {
-                draggingSong = song
-                return NSItemProvider(
-                    object: dragIdentifier(for: song) as NSString
-                )
-            }
+            accessory: .handle
         )
         .id(song.id)
         .contentShape(Rectangle())
-        .onDrop(
-            of: [UTType.text],
-            delegate: SongReorderDropDelegate(
-                targetSong: song,
-                displayedSongs: $displayedSongs,
-                draggingSong: $draggingSong,
-                commitMove: commitMove
-            )
-        )
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
             Button(role: .destructive) {
                 deleteSong(song)
@@ -176,20 +160,18 @@ struct RecognitionTimelineList<Footer: View>: View {
         return songsHeight + gapsHeight + spacingHeight
     }
 
-    private func dragIdentifier(for song: SetlistSong) -> String {
-        song.storageID?.uuidString ?? "preview-\(song.id)"
-    }
-
-    private func commitMove(_ draggedSong: SetlistSong, finalIndex: Int) {
-        guard
-            let sourceIndex = songs.firstIndex(of: draggedSong),
-            sourceIndex != finalIndex
-        else {
-            return
+    private func moveDisplayedSongs(
+        from offsets: IndexSet,
+        to destination: Int
+    ) {
+        let previousSongs = displayedSongs
+        withAnimation(.snappy) {
+            displayedSongs.move(
+                fromOffsets: offsets,
+                toOffset: destination
+            )
         }
-
-        let destination = finalIndex > sourceIndex ? finalIndex + 1 : finalIndex
-        moveSongs(songs, IndexSet(integer: sourceIndex), destination)
+        moveSongs(previousSongs, offsets, destination)
     }
 
     private func scroll<ID: Hashable>(
@@ -212,4 +194,3 @@ private extension View {
             .listRowSeparator(.hidden)
     }
 }
-
