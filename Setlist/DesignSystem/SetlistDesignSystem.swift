@@ -76,6 +76,7 @@ enum SetlistTextStyle {
     case bodySecondary
     case contentArtist
     case utilityMetadata
+    case settingsDescription
 
     var size: CGFloat {
         switch self {
@@ -85,6 +86,7 @@ enum SetlistTextStyle {
         case .contentSong, .bodyPrimary: 16
         case .actionButton, .bodySecondary, .contentArtist: 14
         case .utilityStatus, .utilityMetadata: 12
+        case .settingsDescription: 13
         }
     }
 
@@ -96,6 +98,7 @@ enum SetlistTextStyle {
         case .bodySecondary: 22
         case .actionButton, .contentArtist: 20
         case .utilityStatus, .utilityMetadata: 16
+        case .settingsDescription: 18
         }
     }
 
@@ -112,7 +115,7 @@ enum SetlistTextStyle {
             "Pretendard-Bold"
         case .headingSheet, .headingSection, .contentSong, .actionButton, .utilityStatus:
             "Pretendard-SemiBold"
-        case .bodyPrimary, .bodySecondary, .contentArtist, .utilityMetadata:
+        case .bodyPrimary, .bodySecondary, .contentArtist, .utilityMetadata, .settingsDescription:
             "Pretendard-Regular"
         }
     }
@@ -124,7 +127,7 @@ enum SetlistTextStyle {
         case .headingSection: .headline
         case .contentSong, .bodyPrimary: .body
         case .actionButton, .bodySecondary, .contentArtist: .subheadline
-        case .utilityStatus, .utilityMetadata: .caption
+        case .utilityStatus, .utilityMetadata, .settingsDescription: .caption
         }
     }
 }

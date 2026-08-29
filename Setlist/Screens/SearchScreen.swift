@@ -57,7 +57,6 @@ struct SearchScreen: View {
         .onDisappear {
             searchTask?.cancel()
         }
-        .preferredColorScheme(.dark)
     }
 
     private var sheetHeader: some View {

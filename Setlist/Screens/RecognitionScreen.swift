@@ -74,7 +74,6 @@ struct RecognitionScreen: View {
         .onDisappear {
             updateRecognitionDuration(recognizer.elapsedDuration)
         }
-        .preferredColorScheme(.dark)
     }
 
     private func presentSearch() {

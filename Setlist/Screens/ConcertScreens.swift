@@ -115,7 +115,6 @@ struct ConcertDetailScreen: View {
             playlistName: playlistName,
             tracks: spotifyExportTracks
         )
-        .preferredColorScheme(.dark)
     }
 
     private var playlistName: String {
@@ -236,7 +235,6 @@ struct ConcertEditScreen: View {
             isPresented: $isSearchPresented,
             addSpotifyTrack: addSpotifyTrack
         )
-        .preferredColorScheme(.dark)
     }
 
     private func presentSearch() {
@@ -398,7 +396,6 @@ struct ConcertCompleteScreen: View {
             isPresented: $isSearchPresented,
             addSpotifyTrack: addSpotifyTrack
         )
-        .preferredColorScheme(.dark)
     }
 
     private func presentSearch() {

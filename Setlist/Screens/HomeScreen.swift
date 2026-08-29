@@ -1,6 +1,6 @@
 import SwiftUI
 
-enum SetlistHomeState {
+enum SetlistHomeState: Equatable {
     case empty
     case recorded
 }
@@ -18,29 +18,42 @@ struct HomeScreen: View {
     var deleteConcert: (SetlistConcert) -> Void = { _ in }
 
     var body: some View {
-        ZStack {
-            ScreenBackground()
+        NavigationStack {
+            ZStack {
+                ScreenBackground()
 
-            switch state {
-            case .empty:
-                emptyContent
-            case .recorded:
-                recordedContent
+                switch state {
+                case .empty:
+                    emptyContent
+                case .recorded:
+                    recordedContent
+                }
             }
-        }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            if let activeRecognitionState {
-                MiniBar(
-                    state: activeRecognitionState,
-                    action: toggleRecognition,
-                    expandAction: openRecognition
-                )
-            } else {
-                MiniBar(
-                    state: .start,
-                    action: startRecognition
-                )
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if let activeRecognitionState {
+                    MiniBar(
+                        state: activeRecognitionState,
+                        action: toggleRecognition,
+                        expandAction: openRecognition
+                    )
+                } else {
+                    MiniBar(
+                        state: .start,
+                        action: startRecognition
+                    )
+                }
             }
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    NavigationLink {
+                        SettingsScreen()
+                    } label: {
+                        Label("설정", systemImage: "gearshape")
+                            .labelStyle(.iconOnly)
+                    }
+                }
+            }
+            .toolbarBackground(.hidden, for: .navigationBar)
         }
         .alert(item: $concertPendingDeletion) { concert in
             Alert(
@@ -51,7 +64,6 @@ struct HomeScreen: View {
                 secondaryButton: .cancel(Text("취소"))
             )
         }
-        .preferredColorScheme(.dark)
     }
 
     private var emptyContent: some View {

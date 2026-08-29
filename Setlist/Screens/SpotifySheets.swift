@@ -38,7 +38,6 @@ struct SpotifySheet: View {
                 topTrailingRadius: 40
             )
         )
-        .preferredColorScheme(.dark)
     }
 
     private var connectionContent: some View {
