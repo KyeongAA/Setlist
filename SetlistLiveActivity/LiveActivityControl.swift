@@ -68,7 +68,7 @@ struct CompactRecognitionStatus: View {
             if isListening {
                 Circle()
                     .fill(LiveActivityColor.brand)
-                    .frame(width: 16, height: 16)
+                    .frame(width: 8, height: 8)
             } else {
                 FigmaPlayIcon()
                     .fill(LiveActivityColor.brand)
