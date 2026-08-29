@@ -21,6 +21,14 @@ struct SetlistSong: Identifiable, Hashable {
     var number: String {
         String(format: "%02d", id)
     }
+
+    var stableID: String {
+        if let storageID {
+            return "stored-\(storageID.uuidString)"
+        }
+
+        return "preview-\(id)-\(title)-\(artist)"
+    }
 }
 
 struct SetlistConcert: Identifiable, Hashable {

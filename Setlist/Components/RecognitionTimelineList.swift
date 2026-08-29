@@ -50,7 +50,7 @@ struct RecognitionTimelineList<Footer: View>: View {
     var body: some View {
         ScrollViewReader { scrollProxy in
             List {
-                ForEach(displayedSongs) { song in
+                ForEach(displayedSongs, id: \.stableID) { song in
                     ForEach(gaps(before: song)) { gap in
                         gapRow(gap)
                     }
@@ -93,7 +93,7 @@ struct RecognitionTimelineList<Footer: View>: View {
                 guard
                     automaticallyScrollsToLatest,
                     newSongs.count > oldSongs.count,
-                    let latestSongID = newSongs.last?.id
+                    let latestSongID = newSongs.last?.stableID
                 else {
                     return
                 }
@@ -119,7 +119,7 @@ struct RecognitionTimelineList<Footer: View>: View {
             song: song,
             accessory: .handle
         )
-        .id(song.id)
+        .id(song.stableID)
         .contentShape(Rectangle())
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
             Button(role: .destructive) {
@@ -165,12 +165,10 @@ struct RecognitionTimelineList<Footer: View>: View {
         to destination: Int
     ) {
         let previousSongs = displayedSongs
-        withAnimation(.snappy) {
-            displayedSongs.move(
-                fromOffsets: offsets,
-                toOffset: destination
-            )
-        }
+        displayedSongs.move(
+            fromOffsets: offsets,
+            toOffset: destination
+        )
         moveSongs(previousSongs, offsets, destination)
     }
 
