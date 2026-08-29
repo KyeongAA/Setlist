@@ -172,7 +172,8 @@ struct RecognitionScreen: View {
                     Text("종료")
                         .setlistTextStyle(.actionButton)
                         .foregroundStyle(SetlistColor.textPrimary)
-                        .frame(minWidth: 44, minHeight: 44)
+                        .frame(width: 56, height: 56)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("공연 인식 종료")
