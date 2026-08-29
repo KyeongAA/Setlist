@@ -57,7 +57,7 @@ struct EditableSongList<Footer: View>: View {
                             targetSong: song,
                             displayedSongs: $displayedSongs,
                             draggingSong: $draggingSong,
-                            commitMove: commitMove
+                            moveSongs: moveSongs
                         )
                     )
                     .swipeActions(edge: .trailing, allowsFullSwipe: true) {
@@ -121,19 +121,6 @@ struct EditableSongList<Footer: View>: View {
         song.storageID?.uuidString ?? song.stableID
     }
 
-    private func commitMove(_ draggedSong: SetlistSong, finalIndex: Int) {
-        guard
-            let sourceIndex = songs.firstIndex(where: {
-                $0.stableID == draggedSong.stableID
-            }),
-            sourceIndex != finalIndex
-        else {
-            return
-        }
-
-        let destination = finalIndex > sourceIndex ? finalIndex + 1 : finalIndex
-        moveSongs(songs, IndexSet(integer: sourceIndex), destination)
-    }
 }
 
 extension EditableSongList where Footer == EmptyView {
@@ -162,7 +149,7 @@ struct SongReorderDropDelegate: DropDelegate {
     let targetSong: SetlistSong
     @Binding var displayedSongs: [SetlistSong]
     @Binding var draggingSong: SetlistSong?
-    let commitMove: (SetlistSong, Int) -> Void
+    let moveSongs: ([SetlistSong], IndexSet, Int) -> Void
 
     func dropEntered(info: DropInfo) {
         guard
@@ -178,12 +165,17 @@ struct SongReorderDropDelegate: DropDelegate {
             return
         }
 
+        let previousSongs = displayedSongs
+        let offsets = IndexSet(integer: sourceIndex)
+        let destination = targetIndex > sourceIndex ? targetIndex + 1 : targetIndex
+
         withAnimation(.snappy) {
             displayedSongs.move(
-                fromOffsets: IndexSet(integer: sourceIndex),
-                toOffset: targetIndex > sourceIndex ? targetIndex + 1 : targetIndex
+                fromOffsets: offsets,
+                toOffset: destination
             )
         }
+        moveSongs(previousSongs, offsets, destination)
     }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
@@ -191,16 +183,7 @@ struct SongReorderDropDelegate: DropDelegate {
     }
 
     func performDrop(info: DropInfo) -> Bool {
-        guard
-            let draggingSong,
-            let finalIndex = displayedSongs.firstIndex(where: {
-                $0.stableID == draggingSong.stableID
-            })
-        else {
-            return false
-        }
-
-        commitMove(draggingSong, finalIndex)
+        guard draggingSong != nil else { return false }
         self.draggingSong = nil
         return true
     }

@@ -134,7 +134,7 @@ struct RecognitionTimelineList<Footer: View>: View {
                 targetSong: song,
                 displayedSongs: $displayedSongs,
                 draggingSong: $draggingSong,
-                commitMove: commitMove
+                moveSongs: moveSongs
             )
         )
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
@@ -178,20 +178,6 @@ struct RecognitionTimelineList<Footer: View>: View {
 
     private func dragIdentifier(for song: SetlistSong) -> String {
         song.storageID?.uuidString ?? song.stableID
-    }
-
-    private func commitMove(_ draggedSong: SetlistSong, finalIndex: Int) {
-        guard
-            let sourceIndex = songs.firstIndex(where: {
-                $0.stableID == draggedSong.stableID
-            }),
-            sourceIndex != finalIndex
-        else {
-            return
-        }
-
-        let destination = finalIndex > sourceIndex ? finalIndex + 1 : finalIndex
-        moveSongs(songs, IndexSet(integer: sourceIndex), destination)
     }
 
     private func scroll<ID: Hashable>(
